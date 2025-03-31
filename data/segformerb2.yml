@@ -1,0 +1,91 @@
+dataset:
+  train:
+    type: RescueNet
+    num_workers: 6
+    root_dir: &root /home/monica/tuna/datasets/RescueNet
+    mode: train
+    img_sz: &img_sz [720, 720] 
+    n_classes: &N 11
+    image_processor: True
+    augment:
+      A.HorizontalFlip:
+        p: 0.5
+      A.VerticalFlip:
+        p: 0.5
+      A.RandomCrop:
+        height: 2048
+        width: 2048
+        p: 0.5
+      A.RandomRotate90:
+        p: 0.5
+
+  valid:
+    type: RescueNet
+    num_workers: 6
+    root_dir: *root
+    image_processor: True
+    mode: val
+    img_sz: *img_sz
+    n_classes: *N
+    image_processor: True
+
+  test:
+    type: RescueNet
+    num_workers: 6
+    root_dir: *root
+    mode: test
+    img_sz: *img_sz
+    n_classes: *N
+    image_processor: True
+
+model:
+  type: SegFormerb2
+  args:
+    num_classes: *N
+    target_shape: *img_sz
+
+callbacks:
+  ModelCheckpoint:
+    every_n_epochs: 1
+    save_top_k: 5
+    monitor: validation/loss
+    verbose: True
+
+losses:
+  - loss:
+      type: CrossEntropyLoss
+
+metrics:
+  - metric:
+      type: PixelAccuracy
+  - metric:
+      type: IoU
+      args:
+        K: *N
+  - metric:
+      type: mIoU
+      args:
+        K: *N
+
+hypes:
+  batch_size: 6
+  epochs: 105
+  lr: 0.0001
+
+optimizers:
+  AdamW:
+    scheduler:
+      type: CosineAnnealingWarmRestarts
+      args:
+        T_0: 15
+        T_mult: 2
+      monitor: validation/loss
+    args:
+      weight_decay: 0.0025
+
+hardware:
+  accelerator: gpu
+  devices: -1
+
+loggers:
+  tensorboard:

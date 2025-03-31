@@ -1,0 +1,91 @@
+# This is the training configuration of MCCMNET, which is presented in the paper.
+dataset:
+  train:
+    type: RescueNet
+    num_workers: 6
+    root_dir: &root /home/monica/tuna/datasets/RescueNet
+    mode: train
+    n_classes: &N 11
+    img_sz: [720, 720]
+    augment:
+      A.HorizontalFlip:
+        p: 0.5
+      A.VerticalFlip:
+        p: 0.5
+      A.RandomCrop:
+        height: 2048
+        width: 2048
+        p: 0.5
+      A.RandomRotate90:
+        p: 0.5
+
+  valid:
+    type: RescueNet
+    num_workers: 6
+    root_dir: *root
+    mode: val
+    n_classes: *N
+    img_sz: [720, 720]
+
+  test:
+    type: RescueNet
+    num_workers: 6
+    root_dir: *root
+    mode: test
+    n_classes: *N
+    img_sz: [720, 720]
+
+model:
+  type: MCCMNet+
+  args:
+    channel: 32
+    num_classes: *N
+    enhance_features: True
+    uncertain_predict: True
+    pigm: False
+
+callbacks:
+  ModelCheckpoint:
+    every_n_epochs: 1
+    save_top_k: 5
+    monitor: validation/mIoU
+    verbose: True
+    mode: max
+
+losses:
+  - loss:
+      type: UncertaintyAwareCE
+
+metrics:
+  - metric:
+      type: PixelAccuracy
+  - metric:
+      type: IoU
+      args:
+        K: *N
+  - metric:
+      type: mIoU
+      args:
+        K: *N
+hypes:
+  batch_size: 6
+  epochs: 105
+  lr: 0.0001
+
+optimizers:
+  AdamW:
+    scheduler:
+      type: CosineAnnealingWarmRestarts
+      args:
+        T_0: 15
+        T_mult: 2
+      monitor: validation/loss
+    args:
+      weight_decay: 0.0025
+
+hardware:
+  accelerator: gpu
+  devices: -1
+
+loggers:
+  tensorboard:

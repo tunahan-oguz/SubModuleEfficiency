@@ -1,0 +1,14 @@
+__pycache__/
+wandb/
+run/*
+dataset/
+.DS_Store
+mount-point/
+.venv/
+venv/
+tensorboard/
+train_app.egg-info/
+build/
+converted_models/
+dist/
+images/

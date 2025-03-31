@@ -1,0 +1,32 @@
+{
+    "python.testing.unittestArgs": [
+        "-v",
+        "-s",
+        "./test",
+        "-p",
+        "test_*.py"
+    ],
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.analysis.extraPaths": [
+        "./test"
+    ],
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.python",
+        "editor.formatOnSave": true
+    },
+    "python.linting.enabled": true,
+    "python.languageServer": "Pylance",
+    "python.formatting.provider": "black",
+    "python.formatting.yapfPath": "black",
+    "python.formatting.blackArgs": [
+        "--line-length",
+        "150"
+    ],
+    "python.linting.flake8Args": [
+        "--max-line-length",
+        "150"
+    ],
+    "autoDocstring.docstringFormat": "numpy"
+}
