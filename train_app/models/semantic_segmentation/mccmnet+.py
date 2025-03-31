@@ -2,7 +2,8 @@ from train_app.models.semantic_segmentation.mccmnet import *
 
 @model_registry.register("MCCMNet+")
 class MCCMNetPlus(SemanticSegmentationAdapter):
-    def __init__(self, channel, num_classes, uncertainty=True, enhance_features=True, uncertain_predict=True, pigm=True, *args, **kwargs):
+    def __init__(self, channel, num_classes, enhance_features=True, uncertain_predict=True, pigm=True, 
+                 fusion=True, mbdc=True, *args, **kwargs):
         super(MCCMNetPlus, self).__init__(*args, **kwargs)
         vgg16_bn = models.vgg16_bn(pretrained=True)
         self.inc = vgg16_bn.features[:5]
@@ -11,27 +12,33 @@ class MCCMNetPlus(SemanticSegmentationAdapter):
         self.down3 = vgg16_bn.features[22:32]
         self.down4 = vgg16_bn.features[32:42]
 
-        self.conv_1 = BasicConv2d(64,channel,3,1,1)
-        self.conv_2 = nn.Sequential(MBDC(128,channel))
-        self.conv_3 = nn.Sequential(MBDC(256,channel))
-        self.conv_4 = nn.Sequential(MBDC(512,channel))
-        self.conv_5 = nn.Sequential(MBDC(512,channel))
+        if mbdc:
+            self.conv_1 = nn.Sequential(MBDC(64,channel))
+            self.conv_2 = nn.Sequential(MBDC(128,channel))
+            self.conv_3 = nn.Sequential(MBDC(256,channel))
+            self.conv_4 = nn.Sequential(MBDC(512,channel))
+            self.conv_5 = nn.Sequential(MBDC(512,channel))
+        else:
+            self.conv_1 = BasicConv2d(64, 32, 3, 1, 1)
+            self.conv_2 = BasicConv2d(128, 32, 3, 1, 1)
+            self.conv_3 = BasicConv2d(256, 32, 3, 1, 1)
+            self.conv_4 = BasicConv2d(512, 32, 3, 1, 1)
+            self.conv_5 = BasicConv2d(512, 32, 3, 1, 1)
 
-        self.neck = FPN(in_channels=[channel, channel, channel, channel], out_channels=channel)
+        self.neck = FPN(in_channels=[channel] * 5, out_channels=channel)
 
-        self.decoder = SemanticFPNDecoder(channel = channel,feature_strides=[4, 8, 16, 32],num_classes=num_classes)
+        self.decoder = SemanticFPNDecoder(channel = channel, feature_strides=[1, 2, 4, 8, 16],num_classes=num_classes)
 
         self.cgm = CGM(num_classes) if pigm else lambda x, y: x
         self.psm = PSM(num_classes) if pigm else lambda x, y: x
-
-        self.ufm_layer4 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel, num_classes=num_classes,
-                                          enhance_features=enhance_features, uncertain_predict=uncertain_predict)
-        self.ufm_layer3 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel, num_classes=num_classes,
-                                          enhance_features=enhance_features, uncertain_predict=uncertain_predict)
-        self.ufm_layer2 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel,num_classes=num_classes,
-                                          enhance_features=enhance_features, uncertain_predict=uncertain_predict)
-        self.ufm_layer1 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel, num_classes=num_classes,
-                                          enhance_features=enhance_features, uncertain_predict=uncertain_predict)
+        self.ufm_layer4 = MultiClassUAFM(channel= channel, num_classes=num_classes,
+                                        enhance_features=enhance_features, uncertain_predict=uncertain_predict, fusion=fusion)
+        self.ufm_layer3 = MultiClassUAFM(channel= channel, num_classes=num_classes,
+                                        enhance_features=enhance_features, uncertain_predict=uncertain_predict, fusion=fusion)
+        self.ufm_layer2 = MultiClassUAFM(channel= channel, num_classes=num_classes,
+                                        enhance_features=enhance_features, uncertain_predict=uncertain_predict, fusion=fusion)
+        self.ufm_layer1 = MultiClassUAFM(channel= channel, num_classes=num_classes,
+                                        enhance_features=enhance_features, uncertain_predict=uncertain_predict, fusion=fusion)
 
 
 
@@ -50,7 +57,7 @@ class MCCMNetPlus(SemanticSegmentationAdapter):
         layer2 = self.conv_2(layer2)
         layer1 = self.conv_1(layer1)
 
-        predict_5 = self.decoder(self.neck([layer2,layer3,layer4,layer5]))
+        predict_5 = self.decoder(self.neck([layer1, layer2, layer3, layer4, layer5]))
 
         predict_5_down = F.interpolate(predict_5, layer5.size()[2:], mode='bilinear', align_corners=True)
 

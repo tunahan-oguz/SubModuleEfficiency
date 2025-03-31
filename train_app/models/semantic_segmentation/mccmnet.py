@@ -30,25 +30,33 @@ class MultiClassUAFM(nn.Module):
         x = torch.exp(x) # max uncertainty = N, min uncertainty = 1
         return x.unsqueeze(1).detach()
 
-    def __init__(self, high_channel, low_channel,out_channel,num_classes, enhance_features=True, uncertain_predict=False):
+    def __init__(self, channel ,num_classes, enhance_features=True, uncertain_predict=False, fusion=True):
         super(MultiClassUAFM, self).__init__()
         self.rank = MultiClassUAFM.rank_algorithm
         self.enhance_features = enhance_features
-        self.high_channel = high_channel
-        self.low_channel = low_channel
-        self.out_channel = out_channel
-        self.conv_high = BasicConv2d(self.high_channel,self.out_channel,3,1,1)
-        self.conv_low = BasicConv2d(self.low_channel,self.out_channel,3,1,1)
-        self.conv_fusion = nn.Conv2d(2*self.out_channel,self.out_channel,3,1,1)
-
-        self.seg_out = nn.Conv2d(self.out_channel,num_classes,1)
-        self.uncertain_decider = None
-        if uncertain_predict:
-            self.uncertain_decider = MBDC(in_channel=32, out_channel=num_classes)
+        self.fusion = fusion
+        self.channel = channel
+        if fusion:
+            self.conv_high = BasicConv2d(self.channel,self.channel,3,1,1)
+            self.conv_low = BasicConv2d(self.channel,self.channel,3,1,1)
+            self.conv_fusion = nn.Conv2d(2*self.channel,self.channel,3,1,1)
+            self.seg_out = nn.Conv2d(self.channel,num_classes,1)
+            self.uncertain_decider = None
+            if uncertain_predict:
+                self.uncertain_decider = MBDC(in_channel=32, out_channel=num_classes)
+        else:
+            self.seg_out = nn.Sequential(
+                nn.Conv2d(self.channel, self.channel, 3, 1, 1),
+                nn.LeakyReLU(negative_slope=0.1),
+                nn.Conv2d(self.channel, self.channel, 3, 1, 1),
+                nn.LeakyReLU(negative_slope=0.1),
+                nn.Conv2d(self.channel, num_classes,1)
+            )        
         
 
-
     def forward(self, feature_low, feature_high, map):
+        if not self.fusion:
+            return self.forward_wo_fusion(feature_low, map)
         if self.enhance_features:
             # prepare uncertainty maps of features
             map = torch.softmax(map, dim=1)
@@ -77,36 +85,34 @@ class MultiClassUAFM(nn.Module):
             seg = uncertain_seg * decision_uncertainty + seg
 
         return seg_fusion, seg
+    
+    def forward_wo_fusion(self, x_highres, map):
+        map = torch.softmax(map, dim=1)
+        map_upsampled = F.interpolate(map, x_highres.size()[2:], mode='bilinear', align_corners=True)
+            
+        uncertainty_map_high_rs = self.rank(map_upsampled)
+        x_highres = x_highres * uncertainty_map_high_rs
 
+        output_map = self.seg_out(x_highres)
+        return None, output_map
 
 class FPN(nn.Module):
-    def __init__(self, in_channels,out_channels=256,num_outs=4,
+    def __init__(self, in_channels,out_channels=256,
                  start_level=0,
                  end_level=-1,
-                 no_norm_on_lateral=False,
                  upsample_cfg=dict(mode='nearest')):
         super(FPN, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.num_ins = len(in_channels)
-        self.num_outs = num_outs
-        self.no_norm_on_lateral = no_norm_on_lateral
-        self.fp16_enabled = False
         self.upsample_cfg = upsample_cfg.copy()
 
-        if end_level == -1:
-            self.backbone_end_level = self.num_ins
-            assert num_outs >= self.num_ins - start_level
-        else:
-            self.backbone_end_level = end_level
-            assert end_level <= len(in_channels)
-            assert num_outs == end_level - start_level
         self.start_level = start_level
         self.end_level = end_level
         self.lateral_convs = nn.ModuleList()
         self.fpn_convs = nn.ModuleList()
 
-        for i in range(self.start_level, self.backbone_end_level):
+        for i in range(self.num_ins):
             l_conv = nn.Conv2d(
                 in_channels[i],
                 out_channels,
@@ -135,8 +141,6 @@ class FPN(nn.Module):
         # build top-down path
         used_backbone_levels = len(laterals)
         for i in range(used_backbone_levels - 1, 0, -1):
-            # In some cases, fixing `scale factor` (e.g. 2) is preferred, but
-            #  it cannot co-exist with `size` in `F.interpolate`.
             if 'scale_factor' in self.upsample_cfg:
                 laterals[i - 1] += F.interpolate(laterals[i],
                                                  **self.upsample_cfg)
@@ -168,7 +172,7 @@ class SemanticFPNDecoder(nn.Module):
             for k in range(head_length):
                 scale_head.append(
                     nn.Sequential(nn.Conv2d(
-                        32 if k == 0 else self.channels,
+                        self.channels,
                         self.channels,
                         kernel_size=3,
                         padding=1), nn.BatchNorm2d(self.channels), nn.ReLU(inplace=True)))
@@ -304,17 +308,17 @@ class MCCMNet(SemanticSegmentationAdapter):
         self.conv_4 = nn.Sequential(MBDC(512,channel))
         self.conv_5 = nn.Sequential(MBDC(512,channel))
 
-        self.neck = FPN(in_channels=[channel, channel, channel, channel], out_channels=channel)
+        self.neck = FPN(in_channels=[channel] * 5, out_channels=channel)
 
-        self.decoder = SemanticFPNDecoder(channel = channel,feature_strides=[4, 8, 16, 32],num_classes=num_classes)
+        self.decoder = SemanticFPNDecoder(channel = channel, feature_strides=[1, 2, 4, 8, 16],num_classes=num_classes)
 
         self.cgm = CGM(num_classes)
         self.psm = PSM(num_classes)
 
-        self.ufm_layer4 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel, num_classes=num_classes)
-        self.ufm_layer3 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel, num_classes=num_classes)
-        self.ufm_layer2 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel,num_classes=num_classes)
-        self.ufm_layer1 = MultiClassUAFM(high_channel = channel,low_channel = channel, out_channel = channel, num_classes=num_classes)
+        self.ufm_layer4 = MultiClassUAFM(channel = channel, num_classes=num_classes)
+        self.ufm_layer3 = MultiClassUAFM(high_channel = channel, num_classes=num_classes)
+        self.ufm_layer2 = MultiClassUAFM(high_channel = channel, num_classes=num_classes)
+        self.ufm_layer1 = MultiClassUAFM(high_channel = channel, num_classes=num_classes)
 
 
 
@@ -333,7 +337,7 @@ class MCCMNet(SemanticSegmentationAdapter):
         layer2 = self.conv_2(layer2)
         layer1 = self.conv_1(layer1)
 
-        predict_5 = self.decoder(self.neck([layer2,layer3,layer4,layer5]))
+        predict_5 = self.decoder(self.neck([layer1, layer2,layer3,layer4,layer5]))
 
         predict_5_down = F.interpolate(predict_5, layer5.size()[2:], mode='bilinear', align_corners=True)
 
