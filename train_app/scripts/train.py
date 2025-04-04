@@ -120,7 +120,7 @@ class Trainer:
             logger=self.loggers,
             # deterministic keeps the trainings same, slows down the training.
             # deterministic=False,
-            strategy="ddp",
+            strategy="ddp_find_unused_parameters_true",
             devices=self.hardware["devices"],
             accelerator=self.hardware["accelerator"],
             # num_nodes=2

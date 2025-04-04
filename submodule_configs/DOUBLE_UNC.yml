@@ -41,8 +41,11 @@ model:
     channel: 32
     num_classes: *N
     enhance_features: True
-    uncertain_predict: False
-    pigm: True
+    uncertain_predict: True
+    pigm: False
+    mbdc: True
+    fusion: True
+    
 
 callbacks:
   ModelCheckpoint:

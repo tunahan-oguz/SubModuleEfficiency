@@ -42,7 +42,10 @@ model:
     num_classes: *N
     enhance_features: True
     uncertain_predict: False
-    pigm: True
+    pigm: False
+    mbdc: False
+    fusion: True
+    
 
 callbacks:
   ModelCheckpoint:

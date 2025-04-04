@@ -43,6 +43,9 @@ model:
     enhance_features: True
     uncertain_predict: False
     pigm: True
+    mbdc: True
+    fusion: True
+    
 
 callbacks:
   ModelCheckpoint:
